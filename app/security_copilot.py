@@ -55,8 +55,8 @@ def _build_cql_search_operation() -> dict[str, Any]:
                 "Provide exactly one required parameter named query. "
                 "Do not build a JSON body. "
                 "Do not use any other search parameter. "
-                "The proxy automatically supplies the CTIX defaults component=investigation, "
-                "nominal=true, page=1, and page_size=10. "
+                "The proxy automatically sends the request to "
+                "/ingestion/threat-data/list/ with page=1, page_size=10, and sort=-ctix_modified. "
                 "Use simple CTIX CQL such as type = \"indicator\" or "
                 "type = \"indicator\" AND value contains (\"1.1.1.1\")."
             ),

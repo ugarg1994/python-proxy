@@ -232,17 +232,18 @@ async def security_copilot_threat_data_search(
             status_code=422,
             detail="The query parameter is required for Security Copilot threat data search.",
         )
-    upstream_url = urljoin(_require_upstream_base_url(settings), "threat-data/list/")
+    upstream_url = urljoin(
+        _require_upstream_base_url(settings), "ingestion/threat-data/list/"
+    )
     headers = {"content-type": "application/json"}
-    # CTIX threat-data/list expects these query params for normal threat-data searches.
+    # Match the working CTIX search pattern for threat-data CQL queries.
     query_params = _get_query_params(
         "",
         settings,
         explicit_params={
-            "component": "investigation",
-            "nominal": "true",
             "page": "1",
             "page_size": "10",
+            "sort": "-ctix_modified",
         },
     )
     logger.info(
