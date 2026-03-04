@@ -29,6 +29,12 @@ def _remove_ctix_auth_params(parameters: list[dict[str, Any]] | None) -> list[di
     return stripped
 
 
+def _is_security_copilot_supported_request_body(
+    request_body: dict[str, Any] | None,
+) -> bool:
+    return request_body is None
+
+
 def build_security_copilot_openapi(public_base_url: str) -> dict[str, Any]:
     raw_spec = load_raw_ctix_spec()
     spec = copy.deepcopy(raw_spec)
@@ -36,14 +42,22 @@ def build_security_copilot_openapi(public_base_url: str) -> dict[str, Any]:
     transformed_paths: dict[str, Any] = {}
     for path, path_item in spec.get("paths", {}).items():
         target_path = "/ping/" if path == "/" else path
-        transformed_item = copy.deepcopy(path_item)
-        for method, operation in list(transformed_item.items()):
+        transformed_item: dict[str, Any] = {}
+        for method, operation in path_item.items():
             if not isinstance(operation, dict):
                 continue
-            operation["parameters"] = _remove_ctix_auth_params(
-                operation.get("parameters")
+            if not _is_security_copilot_supported_request_body(
+                operation.get("requestBody")
+            ):
+                continue
+            transformed_operation = copy.deepcopy(operation)
+            transformed_operation["parameters"] = _remove_ctix_auth_params(
+                transformed_operation.get("parameters")
             )
-        transformed_paths[target_path] = transformed_item
+            transformed_item[method] = transformed_operation
+
+        if transformed_item:
+            transformed_paths[target_path] = transformed_item
 
     spec["openapi"] = "3.0.1"
     spec["info"] = {
@@ -52,7 +66,9 @@ def build_security_copilot_openapi(public_base_url: str) -> dict[str, Any]:
         "description": (
             "Security Copilot-facing CTIX API spec routed through the Render proxy. "
             "The proxy preserves method, path, query, headers, and body, and injects "
-            "CTIX AccessID/Signature/Expires query authentication on the server side."
+            "CTIX AccessID/Signature/Expires query authentication on the server side. "
+            "This Security Copilot variant includes only operations without request bodies "
+            "to stay within current API plugin parser limits."
         ),
     }
     spec["servers"] = [{"url": public_base_url.rstrip("/")}]
