@@ -100,6 +100,162 @@ def _build_cql_search_operation() -> dict[str, Any]:
     }
 
 
+def _build_simple_search_operations() -> dict[str, Any]:
+    return {
+        "/security-copilot/search-indicators-by-value/": {
+            "get": {
+                "tags": ["Threat Data"],
+                "summary": "Search indicators by value",
+                "description": (
+                    "Search CTIX indicators by a simple value such as an IP address, "
+                    "domain, URL, or hash. The proxy converts the value into CTIX CQL."
+                ),
+                "operationId": "searchIndicatorsByValue",
+                "parameters": [
+                    {
+                        "name": "value",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string", "example": "1.1.1.1"},
+                        "description": "Indicator value to search for.",
+                    }
+                ],
+                "responses": {"200": {"description": "Indicator search results from CTIX."}},
+            }
+        },
+        "/security-copilot/search-reports-by-keyword/": {
+            "get": {
+                "tags": ["Reports"],
+                "summary": "Search reports by keyword",
+                "description": (
+                    "Search CTIX reports by a keyword in the report name. "
+                    "The proxy converts the keyword into CTIX CQL."
+                ),
+                "operationId": "searchReportsByKeyword",
+                "parameters": [
+                    {
+                        "name": "keyword",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string", "example": "phishing"},
+                        "description": "Keyword to search for in report names.",
+                    }
+                ],
+                "responses": {"200": {"description": "Report search results from CTIX."}},
+            }
+        },
+        "/security-copilot/search-threat-data-by-type/": {
+            "get": {
+                "tags": ["Threat Data"],
+                "summary": "Search threat data by object type",
+                "description": (
+                    "Search CTIX threat data by object type such as indicator, malware, "
+                    "threat-actor, report, or vulnerability."
+                ),
+                "operationId": "searchThreatDataByType",
+                "parameters": [
+                    {
+                        "name": "object_type",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string", "example": "malware"},
+                        "description": "CTIX object type to search for.",
+                    }
+                ],
+                "responses": {"200": {"description": "Threat data search results from CTIX."}},
+            }
+        },
+        "/security-copilot/search-threat-data-by-tag/": {
+            "get": {
+                "tags": ["Threat Data"],
+                "summary": "Search threat data by tag",
+                "description": "Search CTIX threat data items that contain a given tag.",
+                "operationId": "searchThreatDataByTag",
+                "parameters": [
+                    {
+                        "name": "tag",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string", "example": "phishing"},
+                        "description": "Tag to search for.",
+                    }
+                ],
+                "responses": {"200": {"description": "Tagged threat data search results from CTIX."}},
+            }
+        },
+        "/security-copilot/search-threat-data-advanced/": {
+            "get": {
+                "tags": ["Threat Data"],
+                "summary": "Search threat data with multiple filters",
+                "description": (
+                    "Search CTIX threat data using simple filter parameters such as value, tag, "
+                    "object types, sources, source collections, countries, ranges, and boolean flags. "
+                    "The proxy converts these filters into CTIX CQL."
+                ),
+                "operationId": "searchThreatDataAdvanced",
+                "parameters": [
+                    {
+                        "name": "value",
+                        "in": "query",
+                        "schema": {"type": "string", "example": "1.1.1.1"},
+                        "description": "Threat data value to search for.",
+                    },
+                    {
+                        "name": "tag",
+                        "in": "query",
+                        "schema": {"type": "string", "example": "phishing"},
+                        "description": "Tag to search for.",
+                    },
+                    {
+                        "name": "object_types",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "example": "indicator,malware,threat-actor",
+                        },
+                        "description": "Comma-separated CTIX object types.",
+                    },
+                    {
+                        "name": "ioc_type",
+                        "in": "query",
+                        "schema": {"type": "string", "example": "ALL"},
+                    },
+                    {
+                        "name": "sources",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "example": "dac01547-0550-4a5f-a51c-209142c7bb31,92614d49-0766-4331-bbc0-be4e78ad7b3a",
+                        },
+                    },
+                    {
+                        "name": "source_collections",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "example": "bb9a8b41-9a9d-452f-a16e-85dc70ba9eb5,dafc1732-4072-464e-8f0e-33b24b00c950",
+                        },
+                    },
+                    {
+                        "name": "countries",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "example": "Afghanistan,Aland Islands,Albania,Algeria",
+                        },
+                    },
+                    {
+                        "name": "is_revoked",
+                        "in": "query",
+                        "schema": {"type": "boolean", "example": True},
+                    },
+                ],
+                "responses": {"200": {"description": "Advanced threat data search results from CTIX."}},
+            }
+        },
+    }
+
+
 def build_security_copilot_openapi(public_base_url: str) -> dict[str, Any]:
     raw_spec = load_raw_ctix_spec()
     spec = copy.deepcopy(raw_spec)
@@ -141,6 +297,7 @@ def build_security_copilot_openapi(public_base_url: str) -> dict[str, Any]:
     spec["servers"] = [{"url": public_base_url.rstrip("/")}]
     spec["paths"] = transformed_paths
     spec["paths"]["/security-copilot/threat-data/search/"] = _build_cql_search_operation()
+    spec["paths"].update(_build_simple_search_operations())
     spec.pop("security", None)
     components = spec.get("components")
     if isinstance(components, dict):

@@ -112,6 +112,47 @@ def _truncate_for_log(content: bytes | str | None, limit: int = 500) -> str | No
     return text if len(text) <= limit else text[:limit] + "...<truncated>"
 
 
+def _escape_cql_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _parse_csv_values(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _format_cql_in(field: str, values: list[str]) -> str | None:
+    if not values:
+        return None
+    escaped = ",".join(f'"{_escape_cql_string(value)}"' for value in values)
+    return f"{field} IN ({escaped})"
+
+
+def _format_cql_equals(field: str, value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    return f'{field} = "{_escape_cql_string(value)}"'
+
+
+def _format_cql_contains(field: str, value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    return f'{field} contains ("{_escape_cql_string(value)}")'
+
+
+def _format_cql_range(field: str, start: str | None, end: str | None) -> str | None:
+    if not start or not end:
+        return None
+    return f'{field} RANGE ("{_escape_cql_string(start)}","{_escape_cql_string(end)}")'
+
+
+def _format_cql_boolean(field: str, value: bool | None) -> str | None:
+    if value is None:
+        return None
+    return f'{field} = "{str(value).lower()}"'
+
+
 def _require_upstream_base_url(settings: Settings) -> str:
     if not settings.upstream_base_url:
         raise HTTPException(status_code=500, detail="UPSTREAM_BASE_URL is not configured")
@@ -184,6 +225,46 @@ async def _send_upstream(
         raise HTTPException(status_code=502, detail=f"Upstream request failed: {exc}") from exc
 
 
+async def _run_ctix_threat_data_search(settings: Settings, cql_query: str) -> Response:
+    upstream_url = urljoin(
+        _require_upstream_base_url(settings), "ingestion/threat-data/list/"
+    )
+    headers = {"content-type": "application/json"}
+    query_params = _get_query_params(
+        "",
+        settings,
+        explicit_params={
+            "page": "1",
+            "page_size": "10",
+            "sort": "-ctix_modified",
+        },
+    )
+    logger.info(
+        "Security Copilot threat-data search query=%s upstream_url=%s query_params=%s",
+        cql_query,
+        upstream_url,
+        _sanitize_query_params(query_params),
+    )
+    upstream_response = await _send_upstream(
+        method="POST",
+        upstream_url=upstream_url,
+        headers=headers,
+        query_params=query_params,
+        content=json.dumps({"query": cql_query}),
+        timeout_seconds=settings.proxy_timeout,
+    )
+
+    response_headers = _filter_response_headers(upstream_response.headers)
+    media_type = upstream_response.headers.get("content-type")
+    return StreamingResponse(
+        upstream_response.aiter_raw(),
+        status_code=upstream_response.status_code,
+        headers=response_headers,
+        media_type=media_type,
+        background=BackgroundTask(upstream_response.aclose),
+    )
+
+
 @app.get("/health")
 async def healthcheck() -> JSONResponse:
     settings = get_settings()
@@ -232,44 +313,155 @@ async def security_copilot_threat_data_search(
             status_code=422,
             detail="The query parameter is required for Security Copilot threat data search.",
         )
-    upstream_url = urljoin(
-        _require_upstream_base_url(settings), "ingestion/threat-data/list/"
-    )
-    headers = {"content-type": "application/json"}
-    # Match the working CTIX search pattern for threat-data CQL queries.
-    query_params = _get_query_params(
-        "",
-        settings,
-        explicit_params={
-            "page": "1",
-            "page_size": "10",
-            "sort": "-ctix_modified",
-        },
-    )
-    logger.info(
-        "Security Copilot threat-data search query=%s upstream_url=%s query_params=%s",
-        cql_query,
-        upstream_url,
-        _sanitize_query_params(query_params),
-    )
-    upstream_response = await _send_upstream(
-        method="POST",
-        upstream_url=upstream_url,
-        headers=headers,
-        query_params=query_params,
-        content=json.dumps({"query": cql_query}),
-        timeout_seconds=settings.proxy_timeout,
-    )
+    return await _run_ctix_threat_data_search(settings, cql_query)
 
-    response_headers = _filter_response_headers(upstream_response.headers)
-    media_type = upstream_response.headers.get("content-type")
-    return StreamingResponse(
-        upstream_response.aiter_raw(),
-        status_code=upstream_response.status_code,
-        headers=response_headers,
-        media_type=media_type,
-        background=BackgroundTask(upstream_response.aclose),
-    )
+
+@app.get("/security-copilot/search-indicators-by-value/")
+async def security_copilot_search_indicators_by_value(
+    value: str = Query(
+        ...,
+        description="Indicator value to search for, such as an IP, domain, URL, or hash.",
+    ),
+) -> Response:
+    settings = get_settings()
+    escaped_value = _escape_cql_string(value)
+    cql_query = f'type = "indicator" AND value contains ("{escaped_value}")'
+    return await _run_ctix_threat_data_search(settings, cql_query)
+
+
+@app.get("/security-copilot/search-reports-by-keyword/")
+async def security_copilot_search_reports_by_keyword(
+    keyword: str = Query(
+        ...,
+        description="Keyword to search for in CTIX report names.",
+    ),
+) -> Response:
+    settings = get_settings()
+    escaped_keyword = _escape_cql_string(keyword)
+    cql_query = f'type = "report" AND name contains ("{escaped_keyword}")'
+    return await _run_ctix_threat_data_search(settings, cql_query)
+
+
+@app.get("/security-copilot/search-threat-data-by-type/")
+async def security_copilot_search_threat_data_by_type(
+    object_type: str = Query(
+        ...,
+        description="CTIX object type such as indicator, malware, threat-actor, report, or vulnerability.",
+    ),
+) -> Response:
+    settings = get_settings()
+    escaped_object_type = _escape_cql_string(object_type)
+    cql_query = f'type = "{escaped_object_type}"'
+    return await _run_ctix_threat_data_search(settings, cql_query)
+
+
+@app.get("/security-copilot/search-threat-data-by-tag/")
+async def security_copilot_search_threat_data_by_tag(
+    tag: str = Query(
+        ...,
+        description="Tag name to search for across CTIX threat data.",
+    ),
+) -> Response:
+    settings = get_settings()
+    escaped_tag = _escape_cql_string(tag)
+    cql_query = f'tags contains ("{escaped_tag}")'
+    return await _run_ctix_threat_data_search(settings, cql_query)
+
+
+@app.get("/security-copilot/search-threat-data-advanced/")
+async def security_copilot_search_threat_data_advanced(
+    value: str | None = Query(default=None, description="Search by threat data value."),
+    tag: str | None = Query(default=None, description="Search by tag."),
+    object_types: str | None = Query(
+        default=None,
+        description="Comma-separated CTIX object types, for example indicator,malware,threat-actor.",
+    ),
+    ioc_type: str | None = Query(default=None, description="IOC type filter."),
+    sources: str | None = Query(
+        default=None,
+        description="Comma-separated source IDs.",
+    ),
+    source_type: str | None = Query(default=None, description="Source type filter."),
+    source_collections: str | None = Query(
+        default=None,
+        description="Comma-separated source collection IDs.",
+    ),
+    published_collections: str | None = Query(
+        default=None,
+        description="Comma-separated published collection IDs.",
+    ),
+    countries: str | None = Query(
+        default=None,
+        description="Comma-separated country names.",
+    ),
+    tlp: str | None = Query(default=None, description="TLP filter."),
+    source_confidence: str | None = Query(default=None, description="Source confidence filter."),
+    source_confidence_min: str | None = Query(default=None),
+    source_confidence_max: str | None = Query(default=None),
+    source_created_from: str | None = Query(default=None),
+    source_created_to: str | None = Query(default=None),
+    source_modified_from: str | None = Query(default=None),
+    source_modified_to: str | None = Query(default=None),
+    published_on_from: str | None = Query(default=None),
+    published_on_to: str | None = Query(default=None),
+    ctix_created_from: str | None = Query(default=None),
+    ctix_created_to: str | None = Query(default=None),
+    ctix_modified_from: str | None = Query(default=None),
+    ctix_modified_to: str | None = Query(default=None),
+    confidence_score_min: str | None = Query(default=None),
+    confidence_score_max: str | None = Query(default=None),
+    valid_from_from: str | None = Query(default=None),
+    valid_from_to: str | None = Query(default=None),
+    valid_until_from: str | None = Query(default=None),
+    valid_until_to: str | None = Query(default=None),
+    analyst_score_min: str | None = Query(default=None),
+    analyst_score_max: str | None = Query(default=None),
+    is_deprecated: bool | None = Query(default=None),
+    is_false_positive: bool | None = Query(default=None),
+    is_reviewed: bool | None = Query(default=None),
+    is_revoked: bool | None = Query(default=None),
+    is_under_review: bool | None = Query(default=None),
+    is_whitelisted: bool | None = Query(default=None),
+) -> Response:
+    settings = get_settings()
+    clauses = [
+        _format_cql_contains("value", value),
+        _format_cql_contains("tags", tag),
+        _format_cql_in("type", _parse_csv_values(object_types)),
+        _format_cql_equals("ioc_type", ioc_type),
+        _format_cql_in("source", _parse_csv_values(sources)),
+        _format_cql_equals("source_type", source_type),
+        _format_cql_in("source_collection", _parse_csv_values(source_collections)),
+        _format_cql_in("published_collection", _parse_csv_values(published_collections)),
+        _format_cql_in("countries", _parse_csv_values(countries)),
+        _format_cql_equals("tlp", tlp),
+        _format_cql_equals("source_confidence", source_confidence),
+        _format_cql_range(
+            "source_confidence_value", source_confidence_min, source_confidence_max
+        ),
+        _format_cql_range("source_created", source_created_from, source_created_to),
+        _format_cql_range("source_modified", source_modified_from, source_modified_to),
+        _format_cql_range("published_on", published_on_from, published_on_to),
+        _format_cql_range("ctix_created", ctix_created_from, ctix_created_to),
+        _format_cql_range("ctix_modified", ctix_modified_from, ctix_modified_to),
+        _format_cql_range("confidence_score", confidence_score_min, confidence_score_max),
+        _format_cql_range("valid_from", valid_from_from, valid_from_to),
+        _format_cql_range("valid_until", valid_until_from, valid_until_to),
+        _format_cql_range("analyst_score", analyst_score_min, analyst_score_max),
+        _format_cql_boolean("is_deprecated", is_deprecated),
+        _format_cql_boolean("is_false_positive", is_false_positive),
+        _format_cql_boolean("is_reviewed", is_reviewed),
+        _format_cql_boolean("is_revoked", is_revoked),
+        _format_cql_boolean("is_under_review", is_under_review),
+        _format_cql_boolean("is_whitelisted", is_whitelisted),
+    ]
+    cql_query = " AND ".join(clause for clause in clauses if clause)
+    if not cql_query:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide at least one search filter for advanced threat data search.",
+        )
+    return await _run_ctix_threat_data_search(settings, cql_query)
 
 
 @app.api_route(

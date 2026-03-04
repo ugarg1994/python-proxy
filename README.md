@@ -37,6 +37,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - `GET /security-copilot/openapi.json`: Security Copilot-compatible OpenAPI spec.
 - `GET /security-copilot/plugin.yaml`: Security Copilot plugin manifest.
 - `GET /security-copilot/threat-data/search/`: Security Copilot-friendly CTIX CQL search wrapper.
+- `GET /security-copilot/search-indicators-by-value/`: natural-language-friendly indicator lookup.
+- `GET /security-copilot/search-reports-by-keyword/`: natural-language-friendly report search.
+- `GET /security-copilot/search-threat-data-by-type/`: simple threat data type search.
+- `GET /security-copilot/search-threat-data-by-tag/`: simple threat data tag search.
+- `GET /security-copilot/search-threat-data-advanced/`: multi-filter threat data search.
 - `ANY /{path}`: forwards to `{UPSTREAM_BASE_URL}/{path}`.
 
 ## Usage
@@ -115,6 +120,11 @@ The generated OpenAPI spec is adapted from `Intel Exchange Swagger API.json` to 
   - `/ping/`
   - `/feed-sources/collection/`
   - `/security-copilot/threat-data/search/`
+  - `/security-copilot/search-indicators-by-value/`
+  - `/security-copilot/search-reports-by-keyword/`
+  - `/security-copilot/search-threat-data-by-type/`
+  - `/security-copilot/search-threat-data-by-tag/`
+  - `/security-copilot/search-threat-data-advanced/`
   - `/reports/`
   - `/reports/{report_id}/`
   - `/reports/{report_id}/run/`
@@ -133,6 +143,34 @@ Prompt pattern for Security Copilot:
 
 ```text
 Use CTIX Proxy to search CTIX threat data by CQL query. Set query to: type = "indicator"
+```
+
+Simpler prompts that are closer to MCP-style usage:
+
+```text
+Use CTIX Proxy to search indicators for 1.1.1.1
+```
+
+```text
+Use CTIX Proxy to search reports for phishing
+```
+
+```text
+Use CTIX Proxy to search threat data for malware
+```
+
+```text
+Use CTIX Proxy to search threat data tagged phishing
+```
+
+For multi-filter searches, use prompts like:
+
+```text
+Use CTIX Proxy to search threat data with value 1.1.1.1, tag phishing, and object types malware and threat-actor.
+```
+
+```text
+Use CTIX Proxy to search threat data with object types indicator, malware, threat-actor and sources dac01547-0550-4a5f-a51c-209142c7bb31,92614d49-0766-4331-bbc0-be4e78ad7b3a.
 ```
 
 ## Notes
