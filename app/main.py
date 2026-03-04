@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import hmac
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -8,7 +9,7 @@ from typing import Any, Iterable
 from urllib.parse import urljoin
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from starlette.background import BackgroundTask
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -91,8 +92,13 @@ def _require_upstream_base_url(settings: Settings) -> str:
 def _get_query_params(
     original_query: str,
     settings: Settings,
+    explicit_params: dict[str, Any] | None = None,
 ) -> httpx.QueryParams:
-    params = httpx.QueryParams(original_query)
+    params = (
+        httpx.QueryParams(explicit_params)
+        if explicit_params is not None
+        else httpx.QueryParams(original_query)
+    )
     if settings.ctix_access_id and settings.ctix_secret_key:
         expires = int(time.time()) + settings.ctix_signature_ttl
         signature = _build_ctix_signature(
@@ -159,6 +165,55 @@ async def security_copilot_plugin(request: Request) -> Response:
     return Response(
         content=build_security_copilot_manifest(public_base_url),
         media_type="application/yaml",
+    )
+
+
+@app.get("/security-copilot/threat-data/search/")
+async def security_copilot_threat_data_search(
+    request: Request,
+    q: str = Query(..., description="CTIX CQL query string"),
+    page: str | None = Query(default=None),
+    page_size: str | None = Query(default=None),
+    page_limit: str | None = Query(default=None),
+    enrichment: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+    component: str | None = Query(default=None),
+    nominal: str | None = Query(default=None),
+) -> Response:
+    settings = get_settings()
+    upstream_url = urljoin(_require_upstream_base_url(settings), "threat-data/list/")
+    headers = {"content-type": "application/json"}
+    forwarded_params = {
+        key: value
+        for key, value in {
+            "page": page,
+            "page_size": page_size,
+            "page_limit": page_limit,
+            "enrichment": enrichment,
+            "sort": sort,
+            "component": component,
+            "nominal": nominal,
+        }.items()
+        if value is not None
+    }
+    query_params = _get_query_params("", settings, explicit_params=forwarded_params)
+    upstream_response = await _send_upstream(
+        method="POST",
+        upstream_url=upstream_url,
+        headers=headers,
+        query_params=query_params,
+        content=json.dumps({"query": q}),
+        timeout_seconds=settings.proxy_timeout,
+    )
+
+    response_headers = _filter_response_headers(upstream_response.headers)
+    media_type = upstream_response.headers.get("content-type")
+    return StreamingResponse(
+        upstream_response.aiter_raw(),
+        status_code=upstream_response.status_code,
+        headers=response_headers,
+        media_type=media_type,
+        background=BackgroundTask(upstream_response.aclose),
     )
 
 

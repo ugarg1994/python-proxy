@@ -8,6 +8,15 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_CTIX_SPEC_PATH = PROJECT_ROOT / "Intel Exchange Swagger API.json"
+SECURITY_COPILOT_ALLOWED_OPERATIONS = {
+    ("/", "get"),
+    ("/feed-sources/collection/", "get"),
+    ("/reports/", "get"),
+    ("/reports/{report_id}/", "get"),
+    ("/reports/{report_id}/run/", "get"),
+    ("/subscriber/polling-report/", "get"),
+    ("/subscriber/inboxing-report/", "get"),
+}
 
 
 @lru_cache(maxsize=1)
@@ -35,6 +44,70 @@ def _is_security_copilot_supported_request_body(
     return request_body is None
 
 
+def _build_cql_search_operation() -> dict[str, Any]:
+    return {
+        "get": {
+            "tags": ["Threat Data"],
+            "summary": "Search Threat Data With CQL",
+            "description": (
+                "Runs a CTIX threat data search using a CQL query. "
+                "This proxy endpoint accepts simple query parameters and translates them "
+                "into the upstream CTIX POST /threat-data/list/ request."
+            ),
+            "operationId": "securityCopilotThreatDataSearch",
+            "parameters": [
+                {
+                    "name": "q",
+                    "in": "query",
+                    "required": True,
+                    "schema": {"type": "string"},
+                    "description": "CTIX CQL query string.",
+                },
+                {
+                    "name": "page",
+                    "in": "query",
+                    "schema": {"type": "string"},
+                },
+                {
+                    "name": "page_size",
+                    "in": "query",
+                    "schema": {"type": "string"},
+                },
+                {
+                    "name": "page_limit",
+                    "in": "query",
+                    "schema": {"type": "string"},
+                },
+                {
+                    "name": "enrichment",
+                    "in": "query",
+                    "schema": {"type": "string"},
+                },
+                {
+                    "name": "sort",
+                    "in": "query",
+                    "schema": {"type": "string"},
+                },
+                {
+                    "name": "component",
+                    "in": "query",
+                    "schema": {"type": "string"},
+                },
+                {
+                    "name": "nominal",
+                    "in": "query",
+                    "schema": {"type": "string"},
+                },
+            ],
+            "responses": {
+                "200": {
+                    "description": "Threat data search results from CTIX.",
+                }
+            },
+        }
+    }
+
+
 def build_security_copilot_openapi(public_base_url: str) -> dict[str, Any]:
     raw_spec = load_raw_ctix_spec()
     spec = copy.deepcopy(raw_spec)
@@ -45,6 +118,8 @@ def build_security_copilot_openapi(public_base_url: str) -> dict[str, Any]:
         transformed_item: dict[str, Any] = {}
         for method, operation in path_item.items():
             if not isinstance(operation, dict):
+                continue
+            if (path, method.lower()) not in SECURITY_COPILOT_ALLOWED_OPERATIONS:
                 continue
             if not _is_security_copilot_supported_request_body(
                 operation.get("requestBody")
@@ -73,6 +148,7 @@ def build_security_copilot_openapi(public_base_url: str) -> dict[str, Any]:
     }
     spec["servers"] = [{"url": public_base_url.rstrip("/")}]
     spec["paths"] = transformed_paths
+    spec["paths"]["/security-copilot/threat-data/search/"] = _build_cql_search_operation()
     spec.pop("security", None)
     components = spec.get("components")
     if isinstance(components, dict):

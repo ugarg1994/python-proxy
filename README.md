@@ -36,6 +36,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - `GET /health`: proxy health/config check.
 - `GET /security-copilot/openapi.json`: Security Copilot-compatible OpenAPI spec.
 - `GET /security-copilot/plugin.yaml`: Security Copilot plugin manifest.
+- `GET /security-copilot/threat-data/search/`: Security Copilot-friendly CTIX CQL search wrapper.
 - `ANY /{path}`: forwards to `{UPSTREAM_BASE_URL}/{path}`.
 
 ## Usage
@@ -110,6 +111,23 @@ The generated OpenAPI spec is adapted from `Intel Exchange Swagger API.json` to 
 - `servers` points to your Render URL
 - CTIX auth query parameters are removed from operations because the proxy injects them
 - the CTIX ping operation is exposed as `/ping/` on the proxy
+- only a small read-only CTIX subset is exposed for Security Copilot:
+  - `/ping/`
+  - `/feed-sources/collection/`
+  - `/security-copilot/threat-data/search/`
+  - `/reports/`
+  - `/reports/{report_id}/`
+  - `/reports/{report_id}/run/`
+  - `/subscriber/polling-report/`
+  - `/subscriber/inboxing-report/`
+
+The CQL search wrapper lets Security Copilot perform threat data searches without calling the original CTIX POST body directly.
+
+Example:
+
+```bash
+curl "https://python-proxy-tume.onrender.com/security-copilot/threat-data/search/?q=type%20%3D%20%22indicator%22%20AND%20value%20contains%20(%22http%22)"
+```
 
 ## Notes
 
