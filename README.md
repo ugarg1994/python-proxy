@@ -9,6 +9,8 @@ It forwards the incoming request to CTIX by:
 - replacing only the base URL with `UPSTREAM_BASE_URL`
 - automatically appending `AccessID`, `Signature`, and `Expires` when CTIX credentials are configured
 
+It also exposes Security Copilot metadata endpoints so you can register the proxy directly from your Render deployment.
+
 ## Setup
 
 ```bash
@@ -32,6 +34,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ## Endpoints
 
 - `GET /health`: proxy health/config check.
+- `GET /security-copilot/openapi.json`: Security Copilot-compatible OpenAPI spec.
+- `GET /security-copilot/plugin.yaml`: Security Copilot plugin manifest.
 - `ANY /{path}`: forwards to `{UPSTREAM_BASE_URL}/{path}`.
 
 ## Usage
@@ -87,10 +91,25 @@ Create a new Web Service and use:
 Set these environment variables in Render:
 
 - `UPSTREAM_BASE_URL` such as `https://sample.domain.com/ctixapi/`
+- `PUBLIC_BASE_URL` such as `https://python-proxy-tume.onrender.com`
 - `CTIX_ACCESS_ID` if CTIX signing is needed
 - `CTIX_SECRET_KEY` if CTIX signing is needed
 - `CTIX_SIGNATURE_TTL` optional, defaults to `25`
 - `PROXY_TIMEOUT` optional, defaults to `60`
+
+## Security Copilot
+
+After deployment, use these Render-hosted URLs:
+
+- Plugin manifest: `https://python-proxy-tume.onrender.com/security-copilot/plugin.yaml`
+- OpenAPI spec: `https://python-proxy-tume.onrender.com/security-copilot/openapi.json`
+
+The generated OpenAPI spec is adapted from `Intel Exchange Swagger API.json` to make it easier to use with Security Copilot:
+
+- `openapi` is rewritten to `3.0.1`
+- `servers` points to your Render URL
+- CTIX auth query parameters are removed from operations because the proxy injects them
+- the CTIX ping operation is exposed as `/ping/` on the proxy
 
 ## Notes
 

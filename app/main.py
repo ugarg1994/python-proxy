@@ -12,6 +12,12 @@ from fastapi import FastAPI, HTTPException, Request
 from starlette.background import BackgroundTask
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from app.security_copilot import (
+    build_security_copilot_manifest,
+    build_security_copilot_openapi,
+    resolve_public_base_url,
+)
+
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -138,6 +144,21 @@ async def healthcheck() -> JSONResponse:
             ),
             "proxy_mode": "method-preserving path-forwarder",
         }
+    )
+
+
+@app.get("/security-copilot/openapi.json")
+async def security_copilot_openapi(request: Request) -> JSONResponse:
+    public_base_url = resolve_public_base_url(str(request.base_url).rstrip("/"))
+    return JSONResponse(build_security_copilot_openapi(public_base_url))
+
+
+@app.get("/security-copilot/plugin.yaml")
+async def security_copilot_plugin(request: Request) -> Response:
+    public_base_url = resolve_public_base_url(str(request.base_url).rstrip("/"))
+    return Response(
+        content=build_security_copilot_manifest(public_base_url),
+        media_type="application/yaml",
     )
 
 
