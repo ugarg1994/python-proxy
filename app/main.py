@@ -1,14 +1,16 @@
 import base64
 import hashlib
 import hmac
+import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 from urllib.parse import urljoin
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -36,6 +38,25 @@ class Settings:
     ctix_secret_key: str | None
     ctix_signature_ttl: int
     proxy_timeout: float
+
+
+class CTIXForwardRequest(BaseModel):
+    method: str = Field(..., description="HTTP method to send to CTIX")
+    path: str = Field(..., description="CTIX API path, for example ping/ or ingestion/reports/")
+    params: dict[str, Any] | None = Field(
+        default=None, description="Optional query parameters to send to CTIX"
+    )
+    headers: dict[str, str] | None = Field(
+        default=None, description="Optional additional request headers"
+    )
+    json_body: Any | None = Field(
+        default=None, alias="json", description="Optional JSON payload"
+    )
+    body: str | None = Field(
+        default=None, description="Optional raw string body for non-JSON requests"
+    )
+
+    model_config = {"populate_by_name": True}
 
 
 def _clean_base_url(raw_value: str | None) -> str | None:
@@ -76,15 +97,59 @@ def _build_ctix_signature(access_id: str, secret_key: str, expires: int) -> str:
     return base64.b64encode(digest).decode("utf-8")
 
 
-def _signed_query_params(
-    original_query: str, access_id: str, secret_key: str, ttl_seconds: int
+def _require_upstream_base_url(settings: Settings) -> str:
+    if not settings.upstream_base_url:
+        raise HTTPException(status_code=500, detail="UPSTREAM_BASE_URL is not configured")
+    return settings.upstream_base_url
+
+
+def _get_query_params(
+    original_query: str,
+    settings: Settings,
+    explicit_params: dict[str, Any] | None = None,
 ) -> httpx.QueryParams:
-    expires = int(time.time()) + ttl_seconds
-    signature = _build_ctix_signature(access_id, secret_key, expires)
-    params = httpx.QueryParams(original_query)
-    params = params.set("AccessID", access_id)
-    params = params.set("Signature", signature)
-    return params.set("Expires", str(expires))
+    params = (
+        httpx.QueryParams(explicit_params)
+        if explicit_params is not None
+        else httpx.QueryParams(original_query)
+    )
+    if settings.ctix_access_id and settings.ctix_secret_key:
+        expires = int(time.time()) + settings.ctix_signature_ttl
+        signature = _build_ctix_signature(
+            settings.ctix_access_id, settings.ctix_secret_key, expires
+        )
+        params = params.set("AccessID", settings.ctix_access_id)
+        params = params.set("Signature", signature)
+        params = params.set("Expires", str(expires))
+    return params
+
+
+async def _send_upstream(
+    *,
+    method: str,
+    upstream_url: str,
+    headers: dict[str, str],
+    query_params: httpx.QueryParams,
+    content: bytes | str | None,
+    timeout_seconds: float,
+) -> httpx.Response:
+    timeout = httpx.Timeout(timeout_seconds)
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+            return await client.send(
+                client.build_request(
+                    method=method,
+                    url=upstream_url,
+                    headers=headers,
+                    params=query_params,
+                    content=content,
+                ),
+                stream=True,
+            )
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="Upstream request timed out") from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Upstream request failed: {exc}") from exc
 
 
 @app.get("/health")
@@ -97,7 +162,40 @@ async def healthcheck() -> JSONResponse:
             "ctix_signing_enabled": bool(
                 settings.ctix_access_id and settings.ctix_secret_key
             ),
+            "ctix_reference": "Intel Exchange Postman API.json",
         }
+    )
+
+
+@app.post("/ctix/request")
+async def ctix_request(payload: CTIXForwardRequest) -> Response:
+    settings = get_settings()
+    upstream_url = urljoin(_require_upstream_base_url(settings), payload.path.lstrip("/"))
+    headers = _filter_request_headers((payload.headers or {}).items())
+    query_params = _get_query_params("", settings, explicit_params=payload.params)
+
+    if payload.json_body is not None:
+        headers.setdefault("content-type", "application/json")
+        content: bytes | str | None = json.dumps(payload.json_body)
+    else:
+        content = payload.body
+
+    upstream_response = await _send_upstream(
+        method=payload.method.upper(),
+        upstream_url=upstream_url,
+        headers=headers,
+        query_params=query_params,
+        content=content,
+        timeout_seconds=settings.proxy_timeout,
+    )
+    response_headers = _filter_response_headers(upstream_response.headers)
+    media_type = upstream_response.headers.get("content-type")
+    return StreamingResponse(
+        upstream_response.aiter_raw(),
+        status_code=upstream_response.status_code,
+        headers=response_headers,
+        media_type=media_type,
+        background=BackgroundTask(upstream_response.aclose),
     )
 
 
@@ -107,41 +205,18 @@ async def healthcheck() -> JSONResponse:
 )
 async def forward(path: str, request: Request) -> Response:
     settings = get_settings()
-    if not settings.upstream_base_url:
-        raise HTTPException(status_code=500, detail="UPSTREAM_BASE_URL is not configured")
-
-    upstream_url = urljoin(settings.upstream_base_url, path)
+    upstream_url = urljoin(_require_upstream_base_url(settings), path)
     headers = _filter_request_headers(request.headers.items())
     body = await request.body()
-    query_params = (
-        _signed_query_params(
-            request.url.query,
-            settings.ctix_access_id,
-            settings.ctix_secret_key,
-            settings.ctix_signature_ttl,
-        )
-        if settings.ctix_access_id and settings.ctix_secret_key
-        else httpx.QueryParams(request.url.query)
+    query_params = _get_query_params(request.url.query, settings)
+    upstream_response = await _send_upstream(
+        method=request.method,
+        upstream_url=upstream_url,
+        headers=headers,
+        query_params=query_params,
+        content=body if body else None,
+        timeout_seconds=settings.proxy_timeout,
     )
-
-    timeout = httpx.Timeout(settings.proxy_timeout)
-
-    try:
-        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
-            upstream_response = await client.send(
-                client.build_request(
-                    method=request.method,
-                    url=upstream_url,
-                    headers=headers,
-                    params=query_params,
-                    content=body if body else None,
-                ),
-                stream=True,
-            )
-    except httpx.TimeoutException as exc:
-        raise HTTPException(status_code=504, detail="Upstream request timed out") from exc
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"Upstream request failed: {exc}") from exc
 
     response_headers = _filter_response_headers(upstream_response.headers)
     media_type = upstream_response.headers.get("content-type")
