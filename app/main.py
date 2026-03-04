@@ -1,7 +1,6 @@
 import base64
 import hashlib
 import hmac
-import json
 import os
 import time
 from dataclasses import dataclass
@@ -10,7 +9,6 @@ from urllib.parse import urljoin
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -38,25 +36,6 @@ class Settings:
     ctix_secret_key: str | None
     ctix_signature_ttl: int
     proxy_timeout: float
-
-
-class CTIXForwardRequest(BaseModel):
-    method: str = Field(..., description="HTTP method to send to CTIX")
-    path: str = Field(..., description="CTIX API path, for example ping/ or ingestion/reports/")
-    params: dict[str, Any] | None = Field(
-        default=None, description="Optional query parameters to send to CTIX"
-    )
-    headers: dict[str, str] | None = Field(
-        default=None, description="Optional additional request headers"
-    )
-    json_body: Any | None = Field(
-        default=None, alias="json", description="Optional JSON payload"
-    )
-    body: str | None = Field(
-        default=None, description="Optional raw string body for non-JSON requests"
-    )
-
-    model_config = {"populate_by_name": True}
 
 
 def _clean_base_url(raw_value: str | None) -> str | None:
@@ -106,13 +85,8 @@ def _require_upstream_base_url(settings: Settings) -> str:
 def _get_query_params(
     original_query: str,
     settings: Settings,
-    explicit_params: dict[str, Any] | None = None,
 ) -> httpx.QueryParams:
-    params = (
-        httpx.QueryParams(explicit_params)
-        if explicit_params is not None
-        else httpx.QueryParams(original_query)
-    )
+    params = httpx.QueryParams(original_query)
     if settings.ctix_access_id and settings.ctix_secret_key:
         expires = int(time.time()) + settings.ctix_signature_ttl
         signature = _build_ctix_signature(
@@ -162,40 +136,8 @@ async def healthcheck() -> JSONResponse:
             "ctix_signing_enabled": bool(
                 settings.ctix_access_id and settings.ctix_secret_key
             ),
-            "ctix_reference": "Intel Exchange Postman API.json",
+            "proxy_mode": "method-preserving path-forwarder",
         }
-    )
-
-
-@app.post("/ctix/request")
-async def ctix_request(payload: CTIXForwardRequest) -> Response:
-    settings = get_settings()
-    upstream_url = urljoin(_require_upstream_base_url(settings), payload.path.lstrip("/"))
-    headers = _filter_request_headers((payload.headers or {}).items())
-    query_params = _get_query_params("", settings, explicit_params=payload.params)
-
-    if payload.json_body is not None:
-        headers.setdefault("content-type", "application/json")
-        content: bytes | str | None = json.dumps(payload.json_body)
-    else:
-        content = payload.body
-
-    upstream_response = await _send_upstream(
-        method=payload.method.upper(),
-        upstream_url=upstream_url,
-        headers=headers,
-        query_params=query_params,
-        content=content,
-        timeout_seconds=settings.proxy_timeout,
-    )
-    response_headers = _filter_response_headers(upstream_response.headers)
-    media_type = upstream_response.headers.get("content-type")
-    return StreamingResponse(
-        upstream_response.aiter_raw(),
-        status_code=upstream_response.status_code,
-        headers=response_headers,
-        media_type=media_type,
-        background=BackgroundTask(upstream_response.aclose),
     )
 
 

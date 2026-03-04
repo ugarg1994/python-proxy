@@ -2,10 +2,12 @@
 
 Small FastAPI service that forwards incoming requests to an upstream API.
 
-It supports two modes:
+It forwards the incoming request to CTIX by:
 
-- Plain proxy: forwards method, path, query string, headers, and body.
-- CTIX signing proxy: automatically appends `AccessID`, `Signature`, and `Expires` query params using the HMAC-SHA1 flow shown in `Intel Exchange Postman API.json`.
+- keeping the same HTTP method
+- keeping the same path, query string, headers, and body
+- replacing only the base URL with `UPSTREAM_BASE_URL`
+- automatically appending `AccessID`, `Signature`, and `Expires` when CTIX credentials are configured
 
 ## Setup
 
@@ -30,46 +32,50 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ## Endpoints
 
 - `GET /health`: proxy health/config check.
-- `POST /ctix/request`: send a CTIX request as JSON while the proxy adds CTIX authentication.
 - `ANY /{path}`: forwards to `{UPSTREAM_BASE_URL}/{path}`.
 
-## CTIX Request Format
+## Usage
 
-Use `POST /ctix/request` when you want your client to explicitly reference a CTIX API path from `Intel Exchange Postman API.json` and let the proxy inject authentication.
-
-Example request for the CTIX `Ping` endpoint:
+Example GET request:
 
 ```bash
-curl -X POST https://your-render-service.onrender.com/ctix/request \
-  -H "Content-Type: application/json" \
-  -d '{
-    "method": "GET",
-    "path": "ping/"
-  }'
+curl https://your-render-service.onrender.com/ping/
 ```
 
-Example request for a CTIX endpoint with query params:
+This becomes:
 
 ```bash
-curl -X POST https://your-render-service.onrender.com/ctix/request \
-  -H "Content-Type: application/json" \
-  -d '{
-    "method": "GET",
-    "path": "ingestion/file/3cd05d6d-3ed4-49ae-8866-4d8f87542fa1/",
-    "params": {
-      "type": "basic"
-    }
-  }'
+GET {UPSTREAM_BASE_URL}/ping/
 ```
 
-Request body fields:
+Example POST request:
 
-- `method`: HTTP verb to send to CTIX.
-- `path`: CTIX path from the Postman collection, relative to `UPSTREAM_BASE_URL`.
-- `params`: optional query parameters.
-- `headers`: optional extra headers.
-- `json`: optional JSON body.
-- `body`: optional raw string body.
+```bash
+curl -X POST https://your-render-service.onrender.com/ingestion/reports/ \
+  -H "Content-Type: application/json" \
+  -d '{"name":"example"}'
+```
+
+This becomes:
+
+```bash
+POST {UPSTREAM_BASE_URL}/ingestion/reports/
+Content-Type: application/json
+
+{"name":"example"}
+```
+
+Query strings are preserved too. For example:
+
+```bash
+curl "https://your-render-service.onrender.com/ingestion/reports/?type=basic"
+```
+
+becomes:
+
+```bash
+GET {UPSTREAM_BASE_URL}/ingestion/reports/?type=basic
+```
 
 ## Deploy On Render
 
@@ -90,4 +96,4 @@ Set these environment variables in Render:
 
 - Hop-by-hop headers such as `Connection` and `Transfer-Encoding` are removed.
 - Redirects are passed through instead of being followed by the proxy.
-- If CTIX credentials are not set, the proxy forwards requests without signing.
+- If CTIX credentials are not set, the proxy still forwards requests but does not add CTIX auth parameters.
