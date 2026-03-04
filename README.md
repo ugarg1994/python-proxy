@@ -126,7 +126,13 @@ The CQL search wrapper lets Security Copilot perform threat data searches withou
 Example:
 
 ```bash
-curl "https://python-proxy-tume.onrender.com/security-copilot/threat-data/search/?q=type%20%3D%20%22indicator%22%20AND%20value%20contains%20(%22http%22)"
+curl "https://python-proxy-tume.onrender.com/security-copilot/threat-data/search/?query=type%20%3D%20%22indicator%22"
+```
+
+Prompt pattern for Security Copilot:
+
+```text
+Use CTIX Proxy to search CTIX threat data by CQL query. Set query to: type = "indicator"
 ```
 
 ## Notes

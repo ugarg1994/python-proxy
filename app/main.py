@@ -170,39 +170,31 @@ async def security_copilot_plugin(request: Request) -> Response:
 
 @app.get("/security-copilot/threat-data/search/")
 async def security_copilot_threat_data_search(
-    request: Request,
-    q: str = Query(..., description="CTIX CQL query string"),
-    page: str | None = Query(default=None),
-    page_size: str | None = Query(default=None),
-    page_limit: str | None = Query(default=None),
-    enrichment: str | None = Query(default=None),
-    sort: str | None = Query(default=None),
-    component: str | None = Query(default=None),
-    nominal: str | None = Query(default=None),
+    query: str | None = Query(
+        default=None,
+        description="CTIX CQL query string. Example: type = \"indicator\"",
+    ),
+    q: str | None = Query(
+        default=None,
+        description="Deprecated alias for query.",
+    ),
 ) -> Response:
     settings = get_settings()
+    cql_query = query or q
+    if not cql_query:
+        raise HTTPException(
+            status_code=422,
+            detail="The query parameter is required for Security Copilot threat data search.",
+        )
     upstream_url = urljoin(_require_upstream_base_url(settings), "threat-data/list/")
     headers = {"content-type": "application/json"}
-    forwarded_params = {
-        key: value
-        for key, value in {
-            "page": page,
-            "page_size": page_size,
-            "page_limit": page_limit,
-            "enrichment": enrichment,
-            "sort": sort,
-            "component": component,
-            "nominal": nominal,
-        }.items()
-        if value is not None
-    }
-    query_params = _get_query_params("", settings, explicit_params=forwarded_params)
+    query_params = _get_query_params("", settings)
     upstream_response = await _send_upstream(
         method="POST",
         upstream_url=upstream_url,
         headers=headers,
         query_params=query_params,
-        content=json.dumps({"query": q}),
+        content=json.dumps({"query": cql_query}),
         timeout_seconds=settings.proxy_timeout,
     )
 

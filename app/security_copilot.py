@@ -48,55 +48,45 @@ def _build_cql_search_operation() -> dict[str, Any]:
     return {
         "get": {
             "tags": ["Threat Data"],
-            "summary": "Search Threat Data With CQL",
+            "summary": "Search CTIX Threat Data by CQL Query",
             "description": (
-                "Runs a CTIX threat data search using a CQL query. "
-                "This proxy endpoint accepts simple query parameters and translates them "
-                "into the upstream CTIX POST /threat-data/list/ request."
+                "Runs a CTIX threat data search using a CQL query string. "
+                "This endpoint is intended for Security Copilot. "
+                "Provide exactly one required parameter named query. "
+                "Do not build a JSON body. "
+                "Do not use any other search parameter. "
+                "Use simple CTIX CQL such as type = \"indicator\" or "
+                "type = \"indicator\" AND value contains (\"1.1.1.1\")."
             ),
-            "operationId": "securityCopilotThreatDataSearch",
+            "operationId": "searchCtixThreatDataByCql",
             "parameters": [
                 {
-                    "name": "q",
+                    "name": "query",
                     "in": "query",
                     "required": True,
-                    "schema": {"type": "string"},
-                    "description": "CTIX CQL query string.",
-                },
-                {
-                    "name": "page",
-                    "in": "query",
-                    "schema": {"type": "string"},
-                },
-                {
-                    "name": "page_size",
-                    "in": "query",
-                    "schema": {"type": "string"},
-                },
-                {
-                    "name": "page_limit",
-                    "in": "query",
-                    "schema": {"type": "string"},
-                },
-                {
-                    "name": "enrichment",
-                    "in": "query",
-                    "schema": {"type": "string"},
-                },
-                {
-                    "name": "sort",
-                    "in": "query",
-                    "schema": {"type": "string"},
-                },
-                {
-                    "name": "component",
-                    "in": "query",
-                    "schema": {"type": "string"},
-                },
-                {
-                    "name": "nominal",
-                    "in": "query",
-                    "schema": {"type": "string"},
+                    "schema": {
+                        "type": "string",
+                        "example": 'type = "indicator"',
+                    },
+                    "description": (
+                        "CTIX CQL query string. "
+                        'Example 1: type = "indicator". '
+                        'Example 2: type = "indicator" AND value contains ("1.1.1.1").'
+                    ),
+                    "examples": {
+                        "list_indicators": {
+                            "summary": "List indicators",
+                            "value": 'type = "indicator"',
+                        },
+                        "search_ip": {
+                            "summary": "Find an IP indicator",
+                            "value": 'type = "indicator" AND value contains ("1.1.1.1")',
+                        },
+                        "search_domain": {
+                            "summary": "Find a domain indicator",
+                            "value": 'type = "indicator" AND value contains ("google.com")',
+                        },
+                    },
                 },
             ],
             "responses": {
