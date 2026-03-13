@@ -38,6 +38,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 - `GET /security-copilot/plugin.yaml`: Security Copilot plugin manifest.
 - `GET /security-copilot/threat-data/search/`: Security Copilot-friendly CTIX CQL search wrapper.
 - `GET /security-copilot/search-indicators-by-value/`: natural-language-friendly indicator lookup.
+- `GET /security-copilot/search-indicators-related-to-threat-actor/`: indicators related to a threat actor name.
 - `GET /security-copilot/search-reports-by-keyword/`: natural-language-friendly report search.
 - `GET /security-copilot/search-threat-data-by-type/`: simple threat data type search.
 - `GET /security-copilot/search-threat-data-by-tag/`: simple threat data tag search.
@@ -119,8 +120,8 @@ The generated OpenAPI spec is adapted from `Intel Exchange Swagger API.json` to 
 - only a small read-only CTIX subset is exposed for Security Copilot:
   - `/ping/`
   - `/feed-sources/collection/`
-  - `/security-copilot/threat-data/search/`
   - `/security-copilot/search-indicators-by-value/`
+  - `/security-copilot/search-indicators-related-to-threat-actor/`
   - `/security-copilot/search-reports-by-keyword/`
   - `/security-copilot/search-threat-data-by-type/`
   - `/security-copilot/search-threat-data-by-tag/`
@@ -138,6 +139,8 @@ Example:
 ```bash
 curl "https://python-proxy-tume.onrender.com/security-copilot/threat-data/search/?query=type%20%3D%20%22indicator%22"
 ```
+
+The raw CQL endpoint remains available on the service, but it is no longer exposed in the Security Copilot OpenAPI. That reduces the chance that Copilot will invent unsupported query strings instead of using the structured endpoints.
 
 Prompt pattern for Security Copilot:
 
@@ -161,6 +164,10 @@ Use CTIX Proxy to search threat data for malware
 
 ```text
 Use CTIX Proxy to search threat data tagged phishing
+```
+
+```text
+Use CTIX Proxy to search indicators related to threat actor APT28.
 ```
 
 For multi-filter searches, use prompts like:

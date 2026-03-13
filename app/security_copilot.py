@@ -44,62 +44,6 @@ def _is_security_copilot_supported_request_body(
     return request_body is None
 
 
-def _build_cql_search_operation() -> dict[str, Any]:
-    return {
-        "get": {
-            "tags": ["Threat Data"],
-            "summary": "Search CTIX Threat Data by CQL Query",
-            "description": (
-                "Runs a CTIX threat data search using a CQL query string. "
-                "This endpoint is intended for Security Copilot. "
-                "Provide exactly one required parameter named query. "
-                "Do not build a JSON body. "
-                "Do not use any other search parameter. "
-                "The proxy automatically sends the request to "
-                "/ingestion/threat-data/list/ with page=1, page_size=10, and sort=-ctix_modified. "
-                "Use simple CTIX CQL such as type = \"indicator\" or "
-                "type = \"indicator\" AND value contains (\"1.1.1.1\")."
-            ),
-            "operationId": "searchCtixThreatDataByCql",
-            "parameters": [
-                {
-                    "name": "query",
-                    "in": "query",
-                    "required": True,
-                    "schema": {
-                        "type": "string",
-                        "example": 'type = "indicator"',
-                    },
-                    "description": (
-                        "CTIX CQL query string. "
-                        'Example 1: type = "indicator". '
-                        'Example 2: type = "indicator" AND value contains ("1.1.1.1").'
-                    ),
-                    "examples": {
-                        "list_indicators": {
-                            "summary": "List indicators",
-                            "value": 'type = "indicator"',
-                        },
-                        "search_ip": {
-                            "summary": "Find an IP indicator",
-                            "value": 'type = "indicator" AND value contains ("1.1.1.1")',
-                        },
-                        "search_domain": {
-                            "summary": "Find a domain indicator",
-                            "value": 'type = "indicator" AND value contains ("google.com")',
-                        },
-                    },
-                },
-            ],
-            "responses": {
-                "200": {
-                    "description": "Threat data search results from CTIX.",
-                }
-            },
-        }
-    }
-
-
 def _build_simple_search_operations() -> dict[str, Any]:
     return {
         "/security-copilot/search-indicators-by-value/": {
@@ -181,6 +125,39 @@ def _build_simple_search_operations() -> dict[str, Any]:
                     }
                 ],
                 "responses": {"200": {"description": "Tagged threat data search results from CTIX."}},
+            }
+        },
+        "/security-copilot/search-indicators-related-to-threat-actor/": {
+            "get": {
+                "tags": ["Threat Data"],
+                "summary": "Search indicators related to a threat actor",
+                "description": (
+                    "Search CTIX indicators that are related to a given threat actor name. "
+                    "Optionally resolve source names to IDs before searching."
+                ),
+                "operationId": "searchIndicatorsRelatedToThreatActor",
+                "parameters": [
+                    {
+                        "name": "threat_actor_name",
+                        "in": "query",
+                        "required": True,
+                        "schema": {"type": "string", "example": "APT28"},
+                        "description": "Threat actor name.",
+                    },
+                    {
+                        "name": "source_names",
+                        "in": "query",
+                        "schema": {"type": "string", "example": "crowdstrike,Threatfeed1"},
+                        "description": "Optional comma-separated source names to resolve to IDs.",
+                    },
+                    {
+                        "name": "sort",
+                        "in": "query",
+                        "schema": {"type": "string", "example": "-ctix_modified"},
+                        "description": "Optional CTIX sort field.",
+                    },
+                ],
+                "responses": {"200": {"description": "Indicator results related to the threat actor."}},
             }
         },
         "/security-copilot/search-threat-data-advanced/": {
@@ -330,7 +307,6 @@ def build_security_copilot_openapi(public_base_url: str) -> dict[str, Any]:
     }
     spec["servers"] = [{"url": public_base_url.rstrip("/")}]
     spec["paths"] = transformed_paths
-    spec["paths"]["/security-copilot/threat-data/search/"] = _build_cql_search_operation()
     spec["paths"].update(_build_simple_search_operations())
     spec.pop("security", None)
     components = spec.get("components")

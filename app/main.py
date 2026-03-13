@@ -490,6 +490,36 @@ async def security_copilot_search_threat_data_by_tag(
     return await _run_ctix_threat_data_search(settings, cql_query)
 
 
+@app.get("/security-copilot/search-indicators-related-to-threat-actor/")
+async def security_copilot_search_indicators_related_to_threat_actor(
+    threat_actor_name: str = Query(
+        ...,
+        description="Threat actor name, for example APT28.",
+    ),
+    source_names: str | None = Query(
+        default=None,
+        description="Optional comma-separated source names to resolve into source IDs.",
+    ),
+    sort: str | None = Query(
+        default=None,
+        description="Optional CTIX sort field.",
+    ),
+) -> Response:
+    settings = get_settings()
+    resolved_source_ids = await _resolve_source_names_to_ids(
+        settings, _parse_csv_values(source_names)
+    )
+    escaped_name = _escape_cql_string(threat_actor_name)
+    clauses = [
+        'type = "indicator"',
+        'related_object = "threat-actor"',
+        f'related_object_value contains ("{escaped_name}")',
+        _format_cql_in("source", resolved_source_ids),
+    ]
+    cql_query = " AND ".join(clause for clause in clauses if clause)
+    return await _run_ctix_threat_data_search(settings, cql_query, sort=sort)
+
+
 @app.get("/security-copilot/search-threat-data-advanced/")
 async def security_copilot_search_threat_data_advanced(
     value: str | None = Query(default=None, description="Search by threat data value."),
