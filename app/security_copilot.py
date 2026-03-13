@@ -225,6 +225,12 @@ def _build_simple_search_operations() -> dict[str, Any]:
                         "description": "Related object value or name.",
                     },
                     {
+                        "name": "sort",
+                        "in": "query",
+                        "schema": {"type": "string", "example": "-ctix_modified"},
+                        "description": "Optional CTIX sort field.",
+                    },
+                    {
                         "name": "object_types",
                         "in": "query",
                         "schema": {

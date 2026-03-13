@@ -188,6 +188,10 @@ Use CTIX Proxy to search threat data with source names Threatfeed and Threatfeed
 Use CTIX Proxy to search threat data with object type indicator, related object threat-actor, and related object value APT28.
 ```
 
+```text
+Use CTIX Proxy to search threat data with source names crowdstrike, object type indicator, and sort by -created.
+```
+
 ## Notes
 
 - Hop-by-hop headers such as `Connection` and `Transfer-Encoding` are removed.

@@ -345,7 +345,9 @@ async def _send_upstream(
         raise HTTPException(status_code=502, detail=f"Upstream request failed: {exc}") from exc
 
 
-async def _run_ctix_threat_data_search(settings: Settings, cql_query: str) -> Response:
+async def _run_ctix_threat_data_search(
+    settings: Settings, cql_query: str, sort: str | None = None
+) -> Response:
     upstream_url = urljoin(
         _require_upstream_base_url(settings), "ingestion/threat-data/list/"
     )
@@ -356,7 +358,7 @@ async def _run_ctix_threat_data_search(settings: Settings, cql_query: str) -> Re
         explicit_params={
             "page": "1",
             "page_size": "10",
-            "sort": "-ctix_modified",
+            "sort": sort or "-ctix_modified",
         },
     )
     logger.info(
@@ -504,6 +506,10 @@ async def security_copilot_search_threat_data_advanced(
         default=None,
         description="Related object value or name, for example APT28.",
     ),
+    sort: str | None = Query(
+        default=None,
+        description="CTIX sort field, for example -ctix_modified, -created, or -confidence_score.",
+    ),
     object_types: str | None = Query(
         default=None,
         description="Comma-separated CTIX object types, for example indicator,malware,threat-actor.",
@@ -613,7 +619,7 @@ async def security_copilot_search_threat_data_advanced(
             status_code=422,
             detail="Provide at least one search filter for advanced threat data search.",
         )
-    return await _run_ctix_threat_data_search(settings, cql_query)
+    return await _run_ctix_threat_data_search(settings, cql_query, sort=sort)
 
 
 @app.api_route(
