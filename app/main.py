@@ -153,6 +153,126 @@ def _format_cql_boolean(field: str, value: bool | None) -> str | None:
     return f'{field} = "{str(value).lower()}"'
 
 
+async def _fetch_upstream_json(
+    *,
+    method: str,
+    upstream_url: str,
+    settings: Settings,
+    query_params: httpx.QueryParams,
+) -> dict[str, Any]:
+    timeout = httpx.Timeout(settings.proxy_timeout)
+    logger.info(
+        "Lookup request to CTIX method=%s upstream_url=%s query_params=%s",
+        method,
+        upstream_url,
+        _sanitize_query_params(query_params),
+    )
+    try:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client:
+            response = await client.get(upstream_url, params=query_params)
+            logger.info(
+                "Lookup response from CTIX method=%s upstream_url=%s status_code=%s",
+                method,
+                upstream_url,
+                response.status_code,
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as exc:
+        logger.exception("CTIX lookup request returned an error")
+        raise HTTPException(
+            status_code=502,
+            detail=f"CTIX lookup failed with status {exc.response.status_code}",
+        ) from exc
+    except httpx.RequestError as exc:
+        logger.exception("CTIX lookup request failed")
+        raise HTTPException(status_code=502, detail=f"CTIX lookup failed: {exc}") from exc
+
+
+async def _collect_paginated_results(
+    *,
+    initial_path: str,
+    settings: Settings,
+    explicit_params: dict[str, Any],
+    max_pages: int = 5,
+) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    next_url = urljoin(_require_upstream_base_url(settings), initial_path)
+    next_params: httpx.QueryParams | None = _get_query_params(
+        "",
+        settings,
+        explicit_params=explicit_params,
+    )
+
+    for _ in range(max_pages):
+        payload = await _fetch_upstream_json(
+            method="GET",
+            upstream_url=next_url,
+            settings=settings,
+            query_params=next_params or httpx.QueryParams(),
+        )
+        results.extend(payload.get("results", []))
+        next_link = payload.get("next")
+        if not next_link:
+            break
+        next_url = urljoin(_require_upstream_base_url(settings), str(next_link))
+        next_params = None
+
+    return results
+
+
+async def _resolve_source_names_to_ids(
+    settings: Settings, source_names: list[str]
+) -> list[str]:
+    if not source_names:
+        return []
+    results = await _collect_paginated_results(
+        initial_path="feed-sources/",
+        settings=settings,
+        explicit_params={"page": "1", "page_size": "100"},
+    )
+    wanted = {name.casefold(): name for name in source_names}
+    matched_ids: list[str] = []
+    matched_names: list[str] = []
+    for item in results:
+        name = str(item.get("name", ""))
+        if name.casefold() in wanted:
+            matched_ids.append(str(item.get("id")))
+            matched_names.append(name)
+    logger.info(
+        "Resolved source names source_names=%s matched_names=%s matched_ids=%s",
+        source_names,
+        matched_names,
+        matched_ids,
+    )
+    return matched_ids
+
+
+async def _resolve_tag_names(
+    settings: Settings, tag_names: list[str]
+) -> list[str]:
+    if not tag_names:
+        return []
+    matched_names: list[str] = []
+    for tag_name in tag_names:
+        results = await _collect_paginated_results(
+            initial_path="tags/",
+            settings=settings,
+            explicit_params={"page": "1", "page_size": "100", "q": tag_name},
+            max_pages=2,
+        )
+        for item in results:
+            candidate = str(item.get("name", ""))
+            if candidate.casefold() == tag_name.casefold():
+                matched_names.append(candidate)
+    logger.info(
+        "Resolved tag names tag_names=%s matched_names=%s",
+        tag_names,
+        matched_names,
+    )
+    return matched_names
+
+
 def _require_upstream_base_url(settings: Settings) -> str:
     if not settings.upstream_base_url:
         raise HTTPException(status_code=500, detail="UPSTREAM_BASE_URL is not configured")
@@ -372,6 +492,18 @@ async def security_copilot_search_threat_data_by_tag(
 async def security_copilot_search_threat_data_advanced(
     value: str | None = Query(default=None, description="Search by threat data value."),
     tag: str | None = Query(default=None, description="Search by tag."),
+    tag_names: str | None = Query(
+        default=None,
+        description="Comma-separated tag names to resolve and search for.",
+    ),
+    related_object: str | None = Query(
+        default=None,
+        description="Related object type, for example threat-actor, malware, or campaign.",
+    ),
+    related_object_value: str | None = Query(
+        default=None,
+        description="Related object value or name, for example APT28.",
+    ),
     object_types: str | None = Query(
         default=None,
         description="Comma-separated CTIX object types, for example indicator,malware,threat-actor.",
@@ -380,6 +512,10 @@ async def security_copilot_search_threat_data_advanced(
     sources: str | None = Query(
         default=None,
         description="Comma-separated source IDs.",
+    ),
+    source_names: str | None = Query(
+        default=None,
+        description="Comma-separated source names to resolve into source IDs.",
     ),
     source_type: str | None = Query(default=None, description="Source type filter."),
     source_collections: str | None = Query(
@@ -424,12 +560,28 @@ async def security_copilot_search_threat_data_advanced(
     is_whitelisted: bool | None = Query(default=None),
 ) -> Response:
     settings = get_settings()
+    resolved_source_ids = await _resolve_source_names_to_ids(
+        settings, _parse_csv_values(source_names)
+    )
+    resolved_tag_names = await _resolve_tag_names(settings, _parse_csv_values(tag_names))
+    source_id_values = _parse_csv_values(sources) + resolved_source_ids
+    tag_values = ([tag] if tag else []) + resolved_tag_names
     clauses = [
         _format_cql_contains("value", value),
-        _format_cql_contains("tags", tag),
+        (
+            "("
+            + " OR ".join(
+                filter(None, (_format_cql_contains("tags", tag_value) for tag_value in tag_values))
+            )
+            + ")"
+        )
+        if tag_values
+        else None,
+        _format_cql_equals("related_object", related_object),
+        _format_cql_contains("related_object_value", related_object_value),
         _format_cql_in("type", _parse_csv_values(object_types)),
         _format_cql_equals("ioc_type", ioc_type),
-        _format_cql_in("source", _parse_csv_values(sources)),
+        _format_cql_in("source", source_id_values),
         _format_cql_equals("source_type", source_type),
         _format_cql_in("source_collection", _parse_csv_values(source_collections)),
         _format_cql_in("published_collection", _parse_csv_values(published_collections)),

@@ -173,6 +173,21 @@ Use CTIX Proxy to search threat data with value 1.1.1.1, tag phishing, and objec
 Use CTIX Proxy to search threat data with object types indicator, malware, threat-actor and sources dac01547-0550-4a5f-a51c-209142c7bb31,92614d49-0766-4331-bbc0-be4e78ad7b3a.
 ```
 
+The advanced endpoint also supports name resolution:
+
+- `source_names`: resolves source names by calling CTIX `/feed-sources/` and substituting matched source IDs.
+- `tag_names`: resolves tag names by calling CTIX `/tags/` and searching with the matched canonical tag names.
+
+Example prompt:
+
+```text
+Use CTIX Proxy to search threat data with source names Threatfeed and Threatfeed1, tag names phishing and malware, and object types malware and threat-actor.
+```
+
+```text
+Use CTIX Proxy to search threat data with object type indicator, related object threat-actor, and related object value APT28.
+```
+
 ## Notes
 
 - Hop-by-hop headers such as `Connection` and `Transfer-Encoding` are removed.

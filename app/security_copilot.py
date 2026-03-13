@@ -207,6 +207,24 @@ def _build_simple_search_operations() -> dict[str, Any]:
                         "description": "Tag to search for.",
                     },
                     {
+                        "name": "tag_names",
+                        "in": "query",
+                        "schema": {"type": "string", "example": "phishing,malware"},
+                        "description": "Comma-separated tag names to resolve before searching.",
+                    },
+                    {
+                        "name": "related_object",
+                        "in": "query",
+                        "schema": {"type": "string", "example": "threat-actor"},
+                        "description": "Related object type.",
+                    },
+                    {
+                        "name": "related_object_value",
+                        "in": "query",
+                        "schema": {"type": "string", "example": "APT28"},
+                        "description": "Related object value or name.",
+                    },
+                    {
                         "name": "object_types",
                         "in": "query",
                         "schema": {
@@ -227,6 +245,16 @@ def _build_simple_search_operations() -> dict[str, Any]:
                             "type": "string",
                             "example": "dac01547-0550-4a5f-a51c-209142c7bb31,92614d49-0766-4331-bbc0-be4e78ad7b3a",
                         },
+                        "description": "Comma-separated source IDs.",
+                    },
+                    {
+                        "name": "source_names",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "example": "Threatfeed,Threatfeed1",
+                        },
+                        "description": "Comma-separated source names to resolve into source IDs.",
                     },
                     {
                         "name": "source_collections",
