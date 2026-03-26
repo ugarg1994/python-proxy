@@ -153,6 +153,24 @@ def _format_cql_boolean(field: str, value: bool | None) -> str | None:
     return f'{field} = "{str(value).lower()}"'
 
 
+def _looks_like_cql(value: str) -> bool:
+    lowered = value.lower()
+    markers = [
+        " = ",
+        " in ",
+        " contains ",
+        " range ",
+        " and ",
+        " or ",
+        "related_object",
+        "related_object_value",
+        "source ",
+        "tags ",
+        "type ",
+    ]
+    return any(marker in lowered for marker in markers)
+
+
 async def _fetch_upstream_json(
     *,
     method: str,
@@ -435,6 +453,16 @@ async def security_copilot_threat_data_search(
             status_code=422,
             detail="The query parameter is required for Security Copilot threat data search.",
         )
+    if not _looks_like_cql(cql_query):
+        logger.warning("Raw CQL route received non-CQL input query=%s", cql_query)
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Plain text was sent to the raw CQL route. "
+                "Use a structured Security Copilot operation such as "
+                "searchIndicatorsRelatedToThreatActor or provide literal CTIX CQL."
+            ),
+        )
     return await _run_ctix_threat_data_search(settings, cql_query)
 
 
@@ -506,6 +534,12 @@ async def security_copilot_search_indicators_related_to_threat_actor(
     ),
 ) -> Response:
     settings = get_settings()
+    logger.info(
+        "Threat-actor relation search threat_actor_name=%s source_names=%s sort=%s",
+        threat_actor_name,
+        source_names,
+        sort,
+    )
     resolved_source_ids = await _resolve_source_names_to_ids(
         settings, _parse_csv_values(source_names)
     )
